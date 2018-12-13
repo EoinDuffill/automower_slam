@@ -3,9 +3,15 @@ import sys
 import rospy
 import time
 import xml.etree.ElementTree as ET
+import json
 from std_msgs.msg import Float32, Float32MultiArray, MultiArrayDimension
 
 class automower_gps(object):
+
+	def __init__(self, source):
+		#GPS Source, 0 is live, 1 is from .gpx file#
+		#live data from gpspipe: gpspipe -w | ./<file_name>.py 1
+		self.gps_receiver = source
 
 	def init(self):
 		#Setup experiment data publisher
@@ -15,7 +21,8 @@ class automower_gps(object):
 		self.longs = []
 		self.times = []
 
-	def parse_points(self):
+	#parse GPS xml file
+	def parse_points_file(self):
 		#open gps points file
 		tree = ET.parse("test_points.gpx")
 		#Get root of xml tree
@@ -30,7 +37,7 @@ class automower_gps(object):
 					if sub_elem1.text == "gps":
 						print sub_elem1.text
 						#transform to seconds
-						time = self.get_seconds(sub_elem2.text.split("Z")[0].split("T")[1])
+						time = self.get_seconds(sub_elem2.text)
 						#Initialise start time var if not done so already					
 						if start_time == None:
 							start_time = time
@@ -42,10 +49,11 @@ class automower_gps(object):
 			
 	#transform HH:MM:SS.mm into seconds
 	def get_seconds(self, time):
+		time = time.split("Z")[0].split("T")[1]
 		h, m, s = time.split(":")
 		return int(h) * 3600 + int(m) * 60 + float(s)
 
-	def publish_all_gps_points(self):
+	def publish_gps_file(self):
 		prev_time = None
 		time_diff = 0
 		#Iterate over each lat,long and time
@@ -81,20 +89,49 @@ class automower_gps(object):
 		#publish result
 		self.pub_gps_data.publish(mat)
 
+	#Read gpspipe from stdin
+	def read_gpspipe(self):
+		line = sys.stdin.readline()
+		if not line: print "not line"
+		else:
+			#into json
+			sentence = json.loads(line)
+			if sentence['class'] == 'TPV':
+				#extract and publish relevant info
+				lat = sentence['lat']
+				lon = sentence['lon']
+				time = self.get_seconds(sentence['time'])
+		 		print sentence
+				self.publish_gps_point(lat, lon, time)
+
 	def fini(self):
 		print("finishing")
 
 	def run(self):
 		try:
 			self.init()
-			self.parse_points()
-			self.publish_all_gps_points()
+			#Live GPS
+			if(self.gps_receiver):
+				while not rospy.is_shutdown():
+					#function to read in GPS from gpspipe
+					self.read_gpspipe()
+			#From file GPS
+			else:
+				self.parse_points_file()
+				self.publish_gps_file()
 		except rospy.exceptions.ROSInterruptException:
 			pass
 		finally:
 			self.fini()
 
 if __name__ == '__main__':
-	rospy.init_node('automower_gps_publisher')
-	slam_gps = automower_gps()
-	slam_gps.run()
+	if(len(sys.argv) > 1):
+		arg = int(sys.argv[1]) 
+		if (arg == 0 or arg == 1):
+			rospy.init_node('automower_gps_publisher')
+			slam_gps = automower_gps(arg)
+			slam_gps.run()
+		else:
+			print "Error parsing command line argument", sys.argv[1]
+	else:
+		print "Command line arguments required, '0' - GPS from file, '1' - Live GPS"
