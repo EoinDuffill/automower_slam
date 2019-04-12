@@ -9,65 +9,66 @@ from gazebo_msgs.msg import ModelStates
 from am_driver.msg import WheelEncoder
 from std_msgs.msg import Float32, Float32MultiArray
 
+
 class automower_odom(object):
 
-	def init(self):
-		#Update rate in Hz
+	def __init__(self):
+		# Update rate in Hz
 		self.update_rate = 50
-		#Distance between the centers of the rear wheels
+		# Distance between the centers of the rear wheels
 		self.wheel_separation_distance = 0.48
-		#Setup experiment data publisher
- 	   	self.pub_odom_data = rospy.Publisher('slam/odom', Float32MultiArray, queue_size=1)
-		#open file
+		# Setup experiment data publisher
+		self.pub_odom_data = rospy.Publisher('slam/odom', Float32MultiArray, queue_size=1)
+		# open file
 		self.file = open("results.txt", "a")
 		self.file_path = '/home/eoin/ROS/catkin_ws/src/automower_slam/src/figure'
 
-		#SIM
-		#Get initial variables from simulator
+		# SIM
+		# Get initial variables from simulator
 		data = rospy.wait_for_message("gazebo/model_states", ModelStates)
-		#get the index into the data for the automower
+		# get the index into the data for the automower
 		index = data.name.index("automower")
 
-		#init vars
+		# init vars
 		self.wheel_l_accum = 0
 		self.wheel_r_accum = 0
 		self.prev_tick = None
-		#initial x,y #SIM
+		# initial x,y #SIM
 		self.x = data.pose[index].position.x
 		self.y = data.pose[index].position.y
-		#initial angle, converted from a quarternion #SIM
-		self.orientation = self.quarternion_to_angle(data.pose[index].orientation.x, data.pose[index].orientation.y,data.pose[index].orientation.z,data.pose[index].orientation.w)
+		# initial angle, converted from a quarternion #SIM
+		self.orientation = self.quarternion_to_angle(data.pose[index].orientation.x, data.pose[index].orientation.y,
+													 data.pose[index].orientation.z, data.pose[index].orientation.w)
 
-		#List of points from the simulator #SIM
+		# List of points from the simulator #SIM
 		self.x_points = []
 		self.y_points = []
 
-		#List of points from odometry
+		# List of points from odometry
 		self.x_odom_points = []
 		self.y_odom_points = []
 
-		#var to hold the tick no of prev tick
+		# var to hold the tick no of prev tick
 		self.prev_tick = None
-		#Start time in seconds from simulator
+		# Start time in seconds from simulator
 		self.start_time = 0
-		#Time since experiment start
+		# Time since experiment start
 		self.time = 0
 
 	def wheel_encoder(self, data):
-		if not(self.prev_tick == None):
-			#Accumulate encoder data 
+		if not(self.prev_tick is None):
+			# Accumulate encoder data
 			self.wheel_l_accum += (data.header.seq - self.prev_tick)*data.lwheel
 			self.wheel_r_accum += (data.header.seq - self.prev_tick)*data.rwheel
-			#Update time variable
+			# Update time variable
 			self.time = (data.header.stamp.secs + (data.header.stamp.nsecs * 10e-10)) - self.start_time
 			
 		else:
-			#Record start time, this is only called on the first iteration
+			# Record start time, this is only called on the first iteration
 			self.start_time = data.header.stamp.secs + (data.header.stamp.nsecs * 10e-10)
 
-		#Record previous tick
+		# Record previous tick
 		self.prev_tick = data.header.seq
-	
 
 	def odometry(self, e_left, e_right, x_start, y_start, theta_start):
 		delta_theta = (e_right - e_left)/self.wheel_separation_distance
@@ -77,7 +78,7 @@ class automower_odom(object):
 		theta = theta_start + delta_theta
 		return x,y,theta
 
-	#Function to take quarternion of automower orientation in 3D space and convert to an angle from a bird eye view
+	# Function to take quarternion of automower orientation in 3D space and convert to an angle from a bird eye view
 	def quarternion_to_angle(self,x, y, z, w):
 		ysqr = y * y
 
@@ -89,54 +90,54 @@ class automower_odom(object):
 
 	def write_data(self):
 		
-		#Calculate position change and orientation
+		# Calculate position change and orientation
 		(self.x, self.y, self.orientation) = self.odometry(self.wheel_l_accum, self.wheel_r_accum, self.x, self.y, self.orientation)
 	
-		#print(self.time, self.orientation, self.x, self.y)
-		#self.file.write("Time = " + str(self.time) + "\n")
-		#self.file.write("Odometry: x = " + str(self.x) + " y = " + str(self.y) + " theta = " + str(self.orientation) + "\n")
-		#x,y plot points
+		# print(self.time, self.orientation, self.x, self.y)
+		# self.file.write("Time = " + str(self.time) + "\n")
+		# self.file.write("Odometry: x = " + str(self.x) + " y = " + str(self.y) + " theta = " + str(self.orientation) + "\n")
+		# x,y plot points
 		self.file.write(str(self.x)+",	"+str(self.y)+"\n")
 		
-		#Record x and y, and x and y predictions from odometry
+		# Record x and y, and x and y predictions from odometry
 		self.x_odom_points.append(self.x)
 		self.y_odom_points.append(self.y)
 
-		#Resets accumalative encoders
+		# Resets accumalative encoders
 		self.wheel_l_accum = 0
 		self.wheel_r_accum = 0
 		
-		#SIM
-		#Get initial variables from simulator
+		# SIM
+		# Get initial variables from simulator
 		data = rospy.wait_for_message("gazebo/model_states", ModelStates)
-		#get the index into the data for the automower
+		# get the index into the data for the automower
 		index = data.name.index("automower")
-		#SIM
+		# SIM
 		self.x_points.append(data.pose[index].position.x)
 		self.y_points.append(data.pose[index].position.y)
 
-		#TEMP plot figure, COMPUTATIONALLY INTENSIVE
-		#self.plot_figure()	
+		# TEMP plot figure, COMPUTATIONALLY INTENSIVE
+		self.plot_figure()
 
 	def plot_figure(self):
-		#Clear points and axis
+		# Clear points and axis
 		plt.cla()
 		plt.clf()
-		#Plot actual x co-ords #SIM
+		# Plot actual x co-ords #SIM
 		plt.plot(self.x_points, self.y_points, 'k')
-		#Plot odometry calculated points
+		# Plot odometry calculated points
 		plt.plot(self.x_odom_points, self.y_odom_points, 'b--')
 
-		#SIM
-		#concatenate all x and all y points for min and max calculations for the graphs axis
+		# SIM
+		# concatenate all x and all y points for min and max calculations for the graphs axis
 		all_x_points = np.concatenate([self.x_points,self.x_odom_points])
 		all_y_points = np.concatenate([self.y_points,self.y_odom_points])
 		
-		#axis sqaured off, uniform in x and y
+		# axis squared off, uniform in x and y
 		plt.axis('equal')
-		#Set axis based on min and max vals in x and y
+		# Set axis based on min and max vals in x and y
 		plt.axis([np.amin(all_x_points) - 1, np.amax(all_x_points) + 1, np.amin(all_y_points) - 1, np.amax(all_y_points) + 1])
-		#Save figure to file
+		# Save figure to file
 		plt.savefig(self.file_path+'.png')
 
 	def update(self):
@@ -149,8 +150,7 @@ class automower_odom(object):
 
 	def run(self):
 		try:
-			self.init()
-			#Setup subscribers
+			# Setup subscribers
 			rospy.Subscriber("wheel_encoder", WheelEncoder, self.wheel_encoder, queue_size=None)
 			r = rospy.Rate(self.update_rate)
 			while not rospy.is_shutdown():
